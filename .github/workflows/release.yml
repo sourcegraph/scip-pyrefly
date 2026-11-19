@@ -52,6 +52,7 @@ jobs:
   docker:
     needs: create-release
     permissions:
+      contents: read
       packages: write
     strategy:
       matrix:
