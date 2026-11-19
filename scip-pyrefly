@@ -1,0 +1,78 @@
+#!/usr/bin/env sh
+
+set -eu
+
+usage() {
+    echo "usage: scip-pyrefly [--output FILE] [PROJECT_DIR] [-- PYREFLY_CHECK_ARGS...]" >&2
+}
+
+# Same interface as `rust-analyzer scip`: index the project in PROJECT_DIR
+# (default: the current directory) into FILE (default: index.scip in the
+# current directory). Arguments after `--` go to `pyrefly check`, such as
+# `--report-scip-project-name` or `--python-interpreter-path`.
+output=index.scip
+project=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --output)
+            [ $# -ge 2 ] || {
+                usage
+                exit 2
+            }
+            output=$2
+            shift 2
+            ;;
+        --output=*)
+            output=${1#--output=}
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "error: unknown option '$1'; pass pyrefly options after '--'." >&2
+            usage
+            exit 2
+            ;;
+        *)
+            [ -z "$project" ] || {
+                usage
+                exit 2
+            }
+            project=$1
+            shift
+            ;;
+    esac
+done
+
+# pyrefly resolves the output path against the project directory, so make it
+# absolute before changing into it.
+case "$output" in
+    /*) ;;
+    *) output="$PWD/$output" ;;
+esac
+mkdir -p "$(dirname "$output")"
+rm -f "$output"
+
+# pyrefly uses the working directory as the project root of the index and
+# finds the project's configuration (and virtual environment) from there.
+cd "${project:-.}"
+
+# `--output-format omit-errors` keeps the logs of projects with many type
+# errors short.
+status=0
+pyrefly check --output-format omit-errors --report-scip "$output" "$@" || status=$?
+
+# pyrefly exits with 1 when it finds type errors, which almost every project
+# has; the index is still complete. Configuration errors also exit with 1,
+# but before pyrefly creates the index file.
+if [ "$status" -eq 1 ] && [ -s "$output" ]; then
+    echo "scip-pyrefly: pyrefly reported type errors; wrote $output anyway." >&2
+    exit 0
+fi
+exit "$status"

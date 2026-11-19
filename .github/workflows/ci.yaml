@@ -1,0 +1,151 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          summarize: false
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+      - run: nix flake check
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          summarize: false
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Build docker image
+        run: nix build .#docker
+
+      - name: Load image into Docker
+        run: docker load < result
+
+      - name: Checkout target repo
+        uses: actions/checkout@v7
+        with:
+          repository: pallets/flask
+          ref: 3.1.3
+          path: target
+
+      - name: Index target via Docker
+        run: docker run --rm -v "$PWD/target:/work" scip-pyrefly:latest
+
+      - name: Check index size
+        run: |
+          size=$(stat --format='%s' target/index.scip)
+          echo "Index size: $size bytes"
+          [ "$size" -ge 102400 ] || { echo "FAIL: index too small"; exit 1; }
+
+      # uv downloads a Python and installs the project's dependencies, which
+      # pyrefly finds in the project's .venv. The Python needs the nix-ld
+      # loader to run and SSL_CERT_FILE to verify certificates.
+      - name: Index target with its dependencies via /bin/sh
+        run: |
+          rm target/index.scip
+          docker run --rm --entrypoint /bin/sh -v "$PWD/target:/work" \
+            scip-pyrefly:latest -c \
+            'uv venv && uv pip install . &&
+             .venv/bin/python -c "import urllib.request; urllib.request.urlopen(\"https://pypi.org\")" &&
+             scip-pyrefly'
+
+      - name: Check index size
+        run: |
+          size=$(stat --format='%s' target/index.scip)
+          echo "Index size: $size bytes"
+          [ "$size" -ge 102400 ] || { echo "FAIL: index too small"; exit 1; }
+
+      # BusyBox wget and ssl_client do not verify TLS certificates.
+      - name: Check the image has no BusyBox TLS clients
+        run: |
+          docker run --rm --entrypoint /bin/sh scip-pyrefly:latest \
+            -c '! command -v wget && ! command -v ssl_client'
+
+  index:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: flask
+            repo: pallets/flask
+            ref: 3.1.3
+            expect_file: src/flask/app.py
+          - name: requests
+            repo: psf/requests
+            ref: v2.34.2
+            expect_file: src/requests/api.py
+          - name: httpx
+            repo: encode/httpx
+            ref: 0.28.1
+            expect_file: httpx/_client.py
+
+    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          summarize: false
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Build scip-pyrefly
+        run: nix build .#scip-pyrefly
+
+      - name: Download scip CLI
+        run: |
+          curl -fsSL https://github.com/scip-code/scip/releases/latest/download/scip-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin scip
+
+      - name: Checkout target repo
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          path: target
+
+      - name: Install dependencies
+        working-directory: target
+        run: python3 -m venv .venv && .venv/bin/pip install -q .
+
+      - name: Run scip-pyrefly
+        run: ./result/bin/scip-pyrefly --output index.scip target
+
+      - name: Validate index
+        run: |
+          size=$(stat --format='%s' index.scip)
+          echo "Index size: $size bytes"
+          [ "$size" -ge 1024 ] || { echo "FAIL: index too small"; exit 1; }
+
+          scip stats --from index.scip --project-root target \
+            | jq -e '.documents > 0 and .occurrences > 0 and .definitions > 0'
+
+          scip print --json index.scip \
+            | jq -e --arg f "${{ matrix.expect_file }}" \
+                'any(.documents[]; .relative_path == $f)'
+
+  ci-pass:
+    if: always()
+    needs: [flake-check, docker, index]
+    runs-on: ubuntu-latest
+    steps:
+      - if: >-
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'cancelled')
+        run: exit 1
