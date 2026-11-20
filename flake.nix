@@ -51,6 +51,33 @@
             installPhase = "install -Dm755 pyrefly $out/bin/pyrefly";
             meta.mainProgram = "pyrefly";
           };
+        # The upstream release binaries, statically linked against musl;
+        # nixpkgs ships an older uv. Only the Linux image uses them.
+        uv =
+          let
+            version = "0.13.9";
+            assets = {
+              x86_64-linux = {
+                name = "x86_64-unknown-linux-musl";
+                hash = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+              };
+              aarch64-linux = {
+                name = "aarch64-unknown-linux-musl";
+                hash = "sha256-N/u3xbxmz5nBKqiBlJ0hYYHiAd7ESXcsQynlZIfWEXk=";
+              };
+            };
+            asset = assets.${system};
+          in
+          pkgs.stdenvNoCC.mkDerivation {
+            pname = "uv";
+            inherit version;
+            src = pkgs.fetchurl {
+              url = "https://github.com/astral-sh/uv/releases/download/${version}/uv-${asset.name}.tar.gz";
+              inherit (asset) hash;
+            };
+            installPhase = "install -Dm755 -t $out/bin uv uvx";
+            meta.mainProgram = "uv";
+          };
         scip-pyrefly = pkgs.writeShellApplication {
           name = "scip-pyrefly";
           runtimeInputs = [ pyrefly ];
@@ -105,7 +132,7 @@
               # Installs the project's dependencies into a virtual
               # environment, with a Python it downloads to match the
               # project's `requires-python`. pyrefly needs no Python.
-              pkgs.uv
+              uv
             ];
             fakeRootCommands = ''
               mkdir -p /work /tmp "$(dirname /${loader})"
