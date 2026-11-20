@@ -18,9 +18,25 @@
         "(?:repo|repository): (?<depName>[^\\s${]+)\\s+ref: (?<currentValue>[^\\s${]+)"
       ],
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^flake\\.nix$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+version = \"(?<currentValue>[^\"]+)\";"
+      ]
     }
   ],
+  "gitIgnoredAuthors": [
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  ],
   "packageRules": [
+    {
+      "description": "The release-hashes workflow adds the new hashes in a second commit; wait for CI on it.",
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": ["flake.nix"],
+      "automerge": false
+    },
     {
       "matchManagers": ["custom.regex"],
       "matchFileNames": [".github/workflows/ci.yaml"],

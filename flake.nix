@@ -19,6 +19,9 @@
         # binaries are statically linked against musl.
         pyrefly =
           let
+            # Renovate bumps the version; the release-hashes workflow then
+            # updates the hashes.
+            # renovate: datasource=github-releases depName=pyrefly-org/pyrefly
             version = "1.5.0";
             assets = {
               x86_64-linux = {
@@ -55,6 +58,7 @@
         # nixpkgs ships an older uv. Only the Linux image uses them.
         uv =
           let
+            # renovate: datasource=github-releases depName=astral-sh/uv
             version = "0.13.9";
             assets = {
               x86_64-linux = {
@@ -119,6 +123,7 @@
           default = scip-pyrefly;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          inherit uv;
           docker = dockerTools.buildLayeredImage {
             name = "scip-pyrefly";
             tag = "latest";

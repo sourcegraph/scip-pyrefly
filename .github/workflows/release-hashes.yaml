@@ -1,0 +1,47 @@
+name: release-hashes
+
+# Renovate bumps the pyrefly and uv versions in flake.nix but cannot update
+# the hashes of their release assets. This recomputes them on Renovate
+# branches and pushes a commit with the new hashes.
+on:
+  push:
+    branches: ["renovate/**"]
+    paths: [flake.nix]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          summarize: false
+
+      - name: Update hashes
+        run: |
+          for package in \
+            x86_64-linux.pyrefly aarch64-linux.pyrefly \
+            x86_64-darwin.pyrefly aarch64-darwin.pyrefly \
+            x86_64-linux.uv aarch64-linux.uv; do
+            src=".#packages.$package.src"
+            old=$(nix eval --raw "$src.outputHash")
+            new=$(nix store prefetch-file --json "$(nix eval --raw "$src.url")" | jq -r .hash)
+            sed -i "s|$old|$new|" flake.nix
+          done
+
+      # Renovate ignores commits by this author (gitIgnoredAuthors), so it
+      # keeps rebasing the branch.
+      - name: Push and run CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am 'Update release asset hashes'
+          git push
+          gh workflow run ci.yaml --ref "$GITHUB_REF_NAME"

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release-hashes.yaml runs CI after pushing, because pushes with
+  # GITHUB_TOKEN do not trigger workflows.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
