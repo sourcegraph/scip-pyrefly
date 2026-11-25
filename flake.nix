@@ -59,15 +59,15 @@
         uv =
           let
             # renovate: datasource=github-releases depName=astral-sh/uv
-            version = "0.13.9";
+            version = "0.13.10";
             assets = {
               x86_64-linux = {
                 name = "x86_64-unknown-linux-musl";
-                hash = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+                hash = "sha256-VZeXA4AIOjQLeYOvBahIJLTbHGK3BZx5aTW3/W3JX9I=";
               };
               aarch64-linux = {
                 name = "aarch64-unknown-linux-musl";
-                hash = "sha256-N/u3xbxmz5nBKqiBlJ0hYYHiAd7ESXcsQynlZIfWEXk=";
+                hash = "sha256-aBdAhP5AtjADYcWyA4BmEg3GLJKSDCKg8x9vx0sGa1c=";
               };
             };
             asset = assets.${system};
