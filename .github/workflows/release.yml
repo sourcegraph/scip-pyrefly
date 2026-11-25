@@ -7,6 +7,12 @@ on:
         description: "Version to release (e.g. 1.2.3, without v prefix)"
         required: true
         type: string
+  # scheduled-release.yml calls this every 4 weeks.
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 
 jobs:
   tag:
@@ -30,9 +36,12 @@ jobs:
       - name: Create and push tag
         env:
           NEW_VERSION: ${{ inputs.version }}
+        # A rerun after a later job failed finds its own tag.
         run: |
-          git tag "v$NEW_VERSION"
-          git push origin "v$NEW_VERSION"
+          if [ "$(git rev-parse -q --verify "refs/tags/v$NEW_VERSION^{commit}" || true)" != "$GITHUB_SHA" ]; then
+            git tag "v$NEW_VERSION"
+            git push origin "v$NEW_VERSION"
+          fi
 
   create-release:
     needs: tag
@@ -47,7 +56,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ inputs.version }}
         run: |
-          gh release create "$TAG" --title "scip-pyrefly $TAG" --generate-notes --draft --verify-tag
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --title "scip-pyrefly $TAG" --generate-notes --draft --verify-tag
 
   docker:
     needs: create-release

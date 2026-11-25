@@ -1,0 +1,108 @@
+name: scheduled-release
+
+# Releases the next patch version every 4 weeks, so the Docker image picks up
+# the nixpkgs fixes that Renovate's weekly lock file maintenance brings in.
+on:
+  # Cron can't express "every 4 weeks", so this runs every Monday and skips
+  # weeks that aren't a multiple of 4 weeks after RELEASE_MONDAY.
+  schedule:
+    - cron: "0 9 * * 1"
+  # Releases the next patch version now.
+  workflow_dispatch:
+
+env:
+  # The other SCIP indexers use the same date, so they release in the same week.
+  RELEASE_MONDAY: "2026-11-23"
+
+# A queued run waits for a running one and then finds main already tagged.
+concurrency: scheduled-release
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # release.yml tags the commit this workflow runs on.
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Run this workflow on main, not $GITHUB_REF."
+            exit 1
+          fi
+
+          # Any day of the release week counts, so reruns after Monday still release.
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            days=$(( ($(date -u +%s) - $(date -u -d "$RELEASE_MONDAY" +%s)) / 86400 ))
+            if (( days < 0 || (days / 7) % 4 != 0 )); then
+              echo "Not a release week ($days days after $RELEASE_MONDAY)."
+              exit 0
+            fi
+          fi
+
+          last="$(git tag -l 'v*' --sort=-v:refname | head -n 1)"
+          if ! [[ "$last" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::The latest tag '$last' is not vM.N.P."
+            exit 1
+          fi
+
+          # release.yml pushes the tag first and publishes the release last, so
+          # a tag alone does not mean the images were pushed.
+          published=false
+          if [ "$(gh release view "$last" --json isDraft --jq .isDraft || true)" = false ]; then
+            published=true
+          fi
+
+          if [ "$(git rev-parse "$last^{commit}")" = "$GITHUB_SHA" ]; then
+            # The Nix build is reproducible, so the same commit gives the same image.
+            if $published; then
+              echo "::notice::main is already released as $last; nothing to release."
+              exit 0
+            fi
+            version="${last#v}"
+            echo "::warning::Finishing $last, whose release is missing or still a draft."
+          elif ! $published; then
+            echo "::error::$last, on an earlier commit, has no published release. Finish it with: gh workflow run release.yml --ref $last -f version=${last#v}"
+            exit 1
+          else
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            if git diff --quiet "$last" "$GITHUB_SHA" -- flake.lock; then
+              echo "::warning::flake.lock has not changed since $last, so v$version gets no nixpkgs fixes. Check the Dependency Dashboard for a lock file maintenance PR that did not merge."
+            fi
+          fi
+
+          # main has no branch protection, so check CI on the commit itself.
+          run="$(gh run list --workflow ci.yaml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run" ]; then
+            echo "::error::ci did not run on $GITHUB_SHA."
+            exit 1
+          fi
+          if ! gh run watch "$run" --exit-status --interval 30 >/dev/null; then
+            echo "::error::ci failed on $GITHUB_SHA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run. Fix or rerun it, then rerun this workflow."
+            exit 1
+          fi
+
+          echo "Releasing v$version"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+  release:
+    needs: version
+    if: needs.version.outputs.version != ''
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
