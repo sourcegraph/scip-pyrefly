@@ -59,7 +59,7 @@
         uv =
           let
             # renovate: datasource=github-releases depName=astral-sh/uv
-            version = "0.13.9";
+            version = "0.13.10";
             assets = {
               x86_64-linux = {
                 name = "x86_64-unknown-linux-musl";
