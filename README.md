@@ -33,4 +33,6 @@ Bump the version and binary hashes in [`flake.nix`](flake.nix) (`nix store prefe
 
 ## Cutting releases
 
-Run **Actions → release → Run workflow** on `main` with version `M.N.P`.
+The scheduled-release workflow releases the next patch version every 4 weeks (on Mondays from 2026-11-23), so the Docker image picks up the nixpkgs updates that Renovate merges weekly. It skips the release when `main` has not changed since the last one, finishes a release that failed partway, and fails when CI did not pass on `main`.
+
+To release now, run **Actions → scheduled-release → Run workflow** on `main` for the next patch version, or **Actions → release → Run workflow** on `main` with version `M.N.P`.
